@@ -1,0 +1,35 @@
+@model List<werxxedPC.Models.Product>
+
+@{
+    ViewData["Title"] = "Каталог";
+}
+
+<h1>Каталог комплектующих</h1>
+
+<form method="get" class="mb-3">
+    <input type="text" name="search" placeholder="Поиск по названию или бренду"
+           value="@Context.Request.Query["search"]" />
+    <button type="submit">Найти</button>
+</form>
+
+<div class="row">
+    @foreach (var product in Model)
+    {
+        <div class="col-md-4 mb-4">
+            <div class="card">
+                @if (!string.IsNullOrEmpty(product.ImageUrl))
+                {
+                    <img src="@product.ImageUrl" class="card-img-top" alt="@product.Title" />
+                }
+                <div class="card-body">
+                    <h5 class="card-title">@product.Title</h5>
+                    <p class="card-text">@product.Brand</p>
+                    <p class="card-text"><strong>@product.Price ₽</strong></p>
+                    <a asp-action="Details" asp-route-id="@product.Id" class="btn btn-primary">
+                        Подробнее
+                    </a>
+                </div>
+            </div>
+        </div>
+    }
+</div>

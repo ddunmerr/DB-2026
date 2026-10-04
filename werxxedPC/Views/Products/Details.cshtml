@@ -1,0 +1,16 @@
+﻿@model werxxedPC.Models.Product
+
+@{
+    ViewData["Title"] = Model.Title;
+}
+
+<h1>@Model.Title</h1>
+<p><strong>Бренд:</strong> @Model.Brand</p>
+<p><strong>Категория:</strong> @Model.Category.Title</p>
+<p><strong>Цена:</strong> @Model.Price ₽</p>
+<p><strong>В наличии:</strong> @Model.Stock шт.</p>
+
+<h3>Характеристики</h3>
+<pre>@Model.Specs</pre>
+
+<a asp-action="Index" class="btn btn-secondary">Назад в каталог</a>
