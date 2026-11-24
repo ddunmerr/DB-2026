@@ -1,11 +1,14 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PcShop.Data;
 using PcShop.Models.Entities;
 using PcShop.Models.ViewModels;
+using System.Security.Claims;
 
 namespace PcShop.Controllers;
 
+[Authorize]
 public class ReviewController : Controller
 {
     private readonly AppDbContext _db;
@@ -151,7 +154,23 @@ public class ReviewController : Controller
 
     private int GetCurrentUserId()
     {
-        return HttpContext.Session.GetInt32("UserId");
+        // Пытаемся получить ID из Claims (стандартный способ при Cookie Auth)
+        var idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
+        if (int.TryParse(idClaim, out int userIdFromClaim))
+        {
+            return userIdFromClaim;
+        }
+
+        // Фолбэк на Session, если вдруг используешь только её
+        var userIdFromSession = HttpContext.Session.GetInt32("UserId");
+        if (userIdFromSession.HasValue)
+        {
+            return userIdFromSession.Value;
+        }
+
+        // Если ничего не найдено, значит пользователь точно не вошел в систему
+        // Но благодаря [Authorize] код сюда в идеале даже не должен дойти
+        throw new UnauthorizedAccessException("Пользователь не авторизован. Пожалуйста, войдите в систему.");
     }
 }

@@ -1,6 +1,8 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PcShop.Data;
+using PcShop.Models.ViewModels;
+using System.Security.Claims;
 
 namespace PcShop.Controllers;
 
@@ -21,25 +23,32 @@ public class ProductController : Controller
         var reviews = await _db.Reviews
             .Where(r => r.ProductId == id)
             .OrderByDescending(r => r.CreatedAt)
-            .Select(r => new
+            .Select(r => new ReviewItemViewModel
             {
-                r.Id,
-                r.Rating,
-                r.Text,
-                r.CreatedAt,
+                Id = r.Id,
+                Rating = r.Rating,
+                Text = r.Text,
+                CreatedAt = r.CreatedAt,
                 AuthorName = r.Customer!.Name,
-                r.CustomerId
+                CustomerId = r.CustomerId
             })
             .ToListAsync();
 
-        var currentUserId = HttpContext.Session.GetInt32("UserId");
-        var userReview = reviews.FirstOrDefault(r => r.CustomerId == currentUserId);
+        int? currentUserId = null;
+        var idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (int.TryParse(idClaim, out var cid))
+            currentUserId = cid;
+        else
+            currentUserId = HttpContext.Session.GetInt32("UserId");
 
-        ViewBag.Product = product;
-        ViewBag.Reviews = reviews;
-        ViewBag.UserReview = userReview;
-        ViewBag.AverageRating = reviews.Any() ? reviews.Average(r => r.Rating) : 0;
+        var vm = new ProductDetailsViewModel
+        {
+            Product = product,
+            Reviews = reviews,
+            UserReview = reviews.FirstOrDefault(r => r.CustomerId == currentUserId),
+            AverageRating = reviews.Count > 0 ? reviews.Average(r => r.Rating) : 0
+        };
 
-        return View();
+        return View(vm);
     }
 }

@@ -59,16 +59,32 @@ public class AccountController : Controller
         if (!ModelState.IsValid)
             return View(model);
 
-        var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Email == model.Email);
+        var user = await _db.Customers.FirstOrDefaultAsync(u => u.Email == model.Email);
 
-        if (customer == null || !BCrypt.Net.BCrypt.Verify(model.Password, customer.PasswordHash))
+        if (user != null && BCrypt.Net.BCrypt.Verify(model.Password, user.PasswordHash))
         {
-            ModelState.AddModelError("", "Неверный email или пароль");
-            return View(model);
+            // 1. Создаем Claims (это правильно и надежно)
+            var claims = new List<Claim>
+        {
+            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new Claim(ClaimTypes.Name, user.Name),
+            new Claim(ClaimTypes.Role, user.Role)
+        };
+
+            var claimsIdentity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+            var authProperties = new AuthenticationProperties { IsPersistent = true };
+
+            await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                new ClaimsPrincipal(claimsIdentity), authProperties);
+
+            // 2. (Опционально) Дублируем в Session для совместимости со старым кодом
+            HttpContext.Session.SetInt32("UserId", user.Id);
+
+            return RedirectToAction("Index", "Home");
         }
 
-        await LoginUser(customer);
-        return RedirectToAction("Index", "Home");
+        ModelState.AddModelError("", "Неверный email или пароль");
+        return View(model);
     }
 
     [HttpPost]

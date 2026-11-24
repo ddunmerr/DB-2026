@@ -18,16 +18,13 @@
                     <form asp-action="Create" method="post">
                         <input type="hidden" asp-for="ProductId" />
                         <div asp-validation-summary="All" class="text-danger"></div>
-
                         <div class="mb-3">
                             <label class="form-label">Оценка</label>
                             <div class="rating-input">
-                                @for (int i = 1; i <= 5; i++)
+                                @for (int i = 5; i >= 1; i--)
                                 {
-                                    <label class="star-label">
-                                        <input type="radio" asp-for="Rating" value="@i" />
-                                        <span class="star">★</span>
-                                    </label>
+                                    <input type="radio" asp-for="Rating" value="@i" id="star_@i" />
+                                    <label for="star_@i" class="star">★</label>
                                 }
                             </div>
                             <span asp-validation-for="Rating" class="text-danger"></span>
@@ -54,10 +51,31 @@
 </div>
 
 <style>
-    .rating-input { display: flex; flex-direction: row-reverse; justify-content: flex-end; }
-    .rating-input input { display: none; }
-    .rating-input .star { font-size: 2rem; cursor: pointer; color: #ddd; transition: color 0.2s; }
-    .rating-input input:checked ~ .star,
-    .rating-input .star:hover,
-    .rating-input .star:hover ~ .star { color: #ffc107; }
+    .rating-input {
+        display: flex;
+        flex-direction: row-reverse; /* Критически важно: визуально разворачивает 5-4-3-2-1 в 1-2-3-4-5 */
+        justify-content: flex-start;
+    }
+
+        .rating-input input {
+            display: none; /* Прячем сами кружочки радио-кнопок */
+        }
+
+        .rating-input .star {
+            font-size: 2rem;
+            color: #ddd;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+            /* При наведении: красим эту звезду и все звезды, которые в HTML идут ПОСЛЕ неё (визуально это звезды слева) */
+            .rating-input .star:hover,
+            .rating-input .star:hover ~ .star {
+                color: #ffc107;
+            }
+
+        /* При клике (выборе): красим эту звезду и все звезды, которые в HTML идут ПОСЛЕ неё */
+        .rating-input input:checked ~ .star {
+            color: #ffc107;
+        }
 </style>

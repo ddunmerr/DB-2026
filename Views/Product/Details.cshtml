@@ -1,9 +1,6 @@
-﻿@{
-    var product = ViewBag.Product as PcShop.Models.Entities.Product;
-    var reviews = ViewBag.Reviews as dynamic;
-    var userReview = ViewBag.UserReview as dynamic;
-    var avgRating = (double)ViewBag.AverageRating;
-    ViewData["Title"] = product?.Name;
+﻿@model PcShop.Models.ViewModels.ProductDetailsViewModel
+@{
+    ViewData["Title"] = Model.Product.Name;
 }
 
 <div class="container py-4">
@@ -12,79 +9,73 @@
         <div class="alert alert-success">@TempData["Success"]</div>
     }
 
-    <!-- Карточка товара -->
     <div class="card mb-4">
         <div class="card-body">
             <div class="row">
                 <div class="col-md-4">
-                    <img src="@(product?.ImageUrl ?? "/images/no-image.png")" 
-                         class="img-fluid" alt="@product?.Name" />
+                    <img src="@(Model.Product.ImageUrl ?? "/images/no-image.png")"
+                         class="img-fluid" alt="@Model.Product.Name" />
                 </div>
                 <div class="col-md-8">
-                    <h2>@product?.Name</h2>
-                    <p class="text-muted">@product?.Brand</p>
-                    <p>@product?.Description</p>
-                    <h3 class="text-success">@product?.Price.ToString("C")</h3>
-                    <p>В наличии: @product?.Stock шт.</p>
+                    <h2>@Model.Product.Name</h2>
+                    <p class="text-muted">@Model.Product.Brand</p>
+                    <p>@Model.Product.Description</p>
+                    <h3 class="text-success">@Model.Product.Price.ToString("N0") ₽</h3>
+                    <p>В наличии: @Model.Product.Stock шт.</p>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Блок отзывов -->
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h4 class="mb-0">
-                Отзывы 
-                <span class="badge bg-warning text-dark">
-                    ★ @avgRating.ToString("0.0")
-                </span>
-                <small class="text-muted">(@reviews?.Count)</small>
+                Отзывы
+                <span class="badge bg-warning text-dark">★ @Model.AverageRating.ToString("0.0")</span>
+                <small class="text-muted">(@Model.Reviews.Count)</small>
             </h4>
-            
-            @if (userReview == null)
+
+            @if (Model.UserReview == null)
             {
-                <a asp-controller="Review" asp-action="Create" 
-                   asp-route-productId="@product?.Id" 
+                <a asp-controller="Review" asp-action="Create"
+                   asp-route-productId="@Model.Product.Id"
                    class="btn btn-primary">✍️ Написать отзыв</a>
             }
         </div>
         <div class="card-body">
-            @if (reviews == null || !reviews.Any())
+            @if (Model.Reviews.Count == 0)
             {
                 <p class="text-muted">Пока нет отзывов. Будьте первым!</p>
             }
             else
             {
-                @foreach (var r in reviews)
+                foreach (var r in Model.Reviews)
                 {
                     <div class="border-bottom py-3">
                         <div class="d-flex justify-content-between">
                             <div>
                                 <strong>@r.AuthorName</strong>
                                 <span class="text-warning">
-                                    @for (int i = 0; i < (int)r.Rating; i++) { <span>★</span> }
-                                    @for (int i = (int)r.Rating; i < 5; i++) { <span>☆</span> }
+                                    @for (int i = 0; i < r.Rating; i++) { <span>★</span> }
+                                    @for (int i = r.Rating; i < 5; i++) { <span>☆</span> }
                                 </span>
                             </div>
-                            <small class="text-muted">@(((DateTime)r.CreatedAt).ToString("d"))</small>
+                            <small class="text-muted">@r.CreatedAt.ToString("dd.MM.yyyy")</small>
                         </div>
                         <p class="mt-2 mb-1">@r.Text</p>
-                        
-                        @if (userReview != null && (int)r.Id == (int)userReview.Id)
+
+                        @if (Model.UserReview != null && r.Id == Model.UserReview.Id)
                         {
                             <div class="d-flex gap-2">
-                                <a asp-controller="Review" asp-action="Edit" 
-                                   asp-route-id="@r.Id" 
+                                <a asp-controller="Review" asp-action="Edit"
+                                   asp-route-id="@r.Id"
                                    class="btn btn-sm btn-outline-primary">✏️ Редактировать</a>
-                                <form asp-controller="Review" asp-action="Delete" 
+                                <form asp-controller="Review" asp-action="Delete"
                                       method="post" class="d-inline"
                                       onsubmit="return confirm('Удалить отзыв?');">
                                     @Html.AntiForgeryToken()
                                     <input type="hidden" name="id" value="@r.Id" />
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">
-                                        🗑️ Удалить
-                                    </button>
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">🗑️ Удалить</button>
                                 </form>
                             </div>
                         }

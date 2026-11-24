@@ -57,27 +57,4 @@ public class CatalogController : Controller
 
         return View(products);
     }
-
-    // Карточка товара
-    public async Task<IActionResult> Details(int id)
-    {
-        var product = await _db.Products
-            .Include(p => p.Category)
-            .Include(p => p.Reviews)
-            .ThenInclude(r => r.Customer)
-            .FirstOrDefaultAsync(p => p.Id == id);
-
-        if (product == null)
-            return NotFound();
-
-        // История цен для графика
-        var priceHistory = await _db.PriceHistories
-            .Where(ph => ph.ProductId == id)
-            .OrderBy(ph => ph.ChangedAt)
-            .ToListAsync();
-
-        ViewBag.PriceHistory = priceHistory;
-
-        return View(product);
-    }
 }
