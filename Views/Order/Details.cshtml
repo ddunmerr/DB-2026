@@ -1,0 +1,53 @@
+﻿@model PcShop.Models.ViewModels.OrderDetailsViewModel
+@{
+    ViewData["Title"] = $"Заказ #{Model.Order.Id}";
+}
+
+<div class="container py-4">
+    <div class="alert alert-success">
+        <h4 class="alert-heading">🎉 Заказ успешно оформлен!</h4>
+        <p>Спасибо за покупку. Ваш заказ №@Model.Order.Id принят в обработку.</p>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between">
+            <h5 class="mb-0">Заказ №@Model.Order.Id</h5>
+            <span class="badge bg-info">@Model.Order.Status</span>
+        </div>
+        <div class="card-body">
+            <p class="text-muted">Дата: @Model.Order.CreatedAt.ToString("dd.MM.yyyy HH:mm")</p>
+
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Товар</th>
+                        <th class="text-center">Кол-во</th>
+                        <th class="text-end">Цена</th>
+                        <th class="text-end">Сумма</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in Model.Order.Items)
+                    {
+                        <tr>
+                            <td>@item.Product?.Name</td>
+                            <td class="text-center">@item.Quantity</td>
+                            <td class="text-end">@item.PriceAtPurchase.ToString("C")</td>
+                            <td class="text-end">@((item.PriceAtPurchase * item.Quantity).ToString("C"))</td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    <tr class="table-active">
+                        <th colspan="3" class="text-end">Итого:</th>
+                        <th class="text-end">@Model.TotalAmount.ToString("C")</th>
+                    </tr>
+                </tfoot>
+            </table>
+
+            <a asp-controller="Order" asp-action="Index" class="btn btn-outline-primary">
+                ← К истории заказов
+            </a>
+        </div>
+    </div>
+</div>

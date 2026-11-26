@@ -9,4 +9,6 @@ public class ConfiguratorViewModel
     public List<Category> Categories { get; set; } = new();
     public decimal TotalPrice { get; set; }
     public int TotalTdp { get; set; }
+    public List<string> Warnings { get; set; } = new();
+
 }

@@ -26,16 +26,16 @@ public class ConfiguratorController : Controller
     {
         var userId = GetCurrentUserId();
         var build = await GetOrCreateActiveBuildAsync(userId);
-
         var items = await _db.BuildItems
             .Where(bi => bi.BuildId == build.Id)
             .Include(bi => bi.Product)
             .ThenInclude(p => p.Category)
             .ToListAsync();
-
         var categories = await _db.Categories
             .Where(c => c.ParentId != null) // только дочерние (Комплектующие)
             .ToListAsync();
+        var warnings = await _compat.GetBottleneckWarningsAsync(
+            items.Select(i => i.Product!).Where(p => p != null));
 
         var vm = new ConfiguratorViewModel
         {
@@ -43,12 +43,13 @@ public class ConfiguratorController : Controller
             Items = items,
             Categories = categories,
             TotalPrice = items.Sum(i => i.Product!.Price * i.Quantity),
-            TotalTdp = items.Sum(i => GetTdp(i.Product!))
+            TotalTdp = items.Sum(i => GetTdp(i.Product!)),
+            Warnings = warnings
         };
 
         return View(vm);
     }
-
+    
     // AJAX: получить совместимые товары категории
     [HttpGet]
     public async Task<IActionResult> GetCompatible(int categoryId)
@@ -59,6 +60,7 @@ public class ConfiguratorController : Controller
         var currentProducts = await _db.BuildItems
             .Where(bi => bi.BuildId == build.Id)
             .Include(bi => bi.Product)
+            .Where(bi => bi.Product != null)
             .Select(bi => bi.Product!)
             .ToListAsync();
 
@@ -184,9 +186,21 @@ public class ConfiguratorController : Controller
 
     private int GetCurrentUserId()
     {
-        // В реальном приложении берем из Claims
-        return HttpContext.Session.GetInt32("UserId")
-            ?? throw new UnauthorizedAccessException();
+        // 1. Сначала пытаемся получить из Claims (стандартный способ при Cookie Auth)
+        var idClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (int.TryParse(idClaim, out int userIdFromClaim))
+        {
+            return userIdFromClaim;
+        }
+
+        // 2. Фолбэк на Session
+        var userIdFromSession = HttpContext.Session.GetInt32("UserId");
+        if (userIdFromSession.HasValue)
+        {
+            return userIdFromSession.Value;
+        }
+
+        throw new UnauthorizedAccessException("Пользователь не авторизован.");
     }
 
     private async Task<Build> GetOrCreateActiveBuildAsync(int userId)

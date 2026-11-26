@@ -23,6 +23,18 @@
                     <h3 class="text-success">@Model.Product.Price.ToString("N0") ₽</h3>
                     <p>В наличии: @Model.Product.Stock шт.</p>
                 </div>
+                    <!-- История цен -->
+                @if (Model.PriceHistory != null && Model.PriceHistory.Any())
+                {
+                    <div class="card mt-4">
+                        <div class="card-header bg-info text-white">
+                            <h5 class="mb-0">📈 История цен</h5>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="priceChart" height="100"></canvas>
+                        </div>
+                    </div>
+                }
             </div>
         </div>
     </div>
@@ -85,3 +97,35 @@
         </div>
     </div>
 </div>
+
+@section Scripts {
+    @if (Model.PriceHistory != null && Model.PriceHistory.Any())
+    {
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <script>
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.PriceHistory.Select(ph => ph.ChangedAt.ToString("dd.MM.yyyy")))),
+                    datasets: [{
+                        label: 'Цена, ₽',
+                        data: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.PriceHistory.Select(ph => ph.Price))),
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: false
+                        }
+                    }
+                }
+            });
+        </script>
+    }
+}

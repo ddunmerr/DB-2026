@@ -34,6 +34,11 @@ public class ProductController : Controller
             })
             .ToListAsync();
 
+        var priceHistory = await _db.PriceHistories
+            .Where(ph => ph.ProductId == id)
+            .OrderBy(ph => ph.ChangedAt)
+            .ToListAsync();
+
         int? currentUserId = null;
         var idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (int.TryParse(idClaim, out var cid))
@@ -46,7 +51,8 @@ public class ProductController : Controller
             Product = product,
             Reviews = reviews,
             UserReview = reviews.FirstOrDefault(r => r.CustomerId == currentUserId),
-            AverageRating = reviews.Count > 0 ? reviews.Average(r => r.Rating) : 0
+            AverageRating = reviews.Count > 0 ? reviews.Average(r => r.Rating) : 0,
+            PriceHistory = priceHistory
         };
 
         return View(vm);

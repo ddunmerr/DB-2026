@@ -1,0 +1,62 @@
+﻿@model List<PcShop.Models.ViewModels.OrderHistoryViewModel>
+@{
+    ViewData["Title"] = "История заказов";
+}
+
+<div class="container py-4">
+    <h2 class="mb-4">📦 История заказов</h2>
+
+    @if (!Model.Any())
+    {
+        <div class="alert alert-info">
+            У вас пока нет заказов. <a asp-controller="Catalog" asp-action="Index">Перейти в каталог</a>
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>№ Заказа</th>
+                        <th>Дата</th>
+                        <th>Товаров</th>
+                        <th>Сумма</th>
+                        <th>Статус</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var order in Model)
+                    {
+                        <tr>
+                            <td><strong>#@order.Id</strong></td>
+                            <td>@order.CreatedAt.ToString("dd.MM.yyyy")</td>
+                            <td>@order.ItemsCount шт.</td>
+                            <td><strong>@order.TotalAmount.ToString("C")</strong></td>
+                            <td>
+                                @if (order.Status == "new")
+                                {
+                                    <span class="badge bg-warning text-dark">Новый</span>
+                                }
+                                else if (order.Status == "completed")
+                                {
+                                    <span class="badge bg-success">Выполнен</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">@order.Status</span>
+                                }
+                            </td>
+                            <td>
+                                <a asp-action="Details" asp-route-id="@order.Id" class="btn btn-sm btn-outline-primary">
+                                    Подробнее
+                                </a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>

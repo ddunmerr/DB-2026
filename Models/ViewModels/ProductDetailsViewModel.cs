@@ -8,6 +8,8 @@ public class ProductDetailsViewModel
     public List<ReviewItemViewModel> Reviews { get; set; } = new();
     public ReviewItemViewModel? UserReview { get; set; }
     public double AverageRating { get; set; }
+    public List<PriceHistory> PriceHistory { get; set; } = new();
+
 }
 
 public class ReviewItemViewModel
