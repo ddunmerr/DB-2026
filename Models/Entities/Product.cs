@@ -24,7 +24,6 @@ public class Product
 
     public string? Description { get; set; }
 
-    [Required, Column(TypeName = "nvarchar(max)")]
     public string Specs { get; set; } = "{}";
 
     public int CategoryId { get; set; }

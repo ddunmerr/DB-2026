@@ -24,4 +24,8 @@
     <Folder Include="wwwroot\images\products\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="PcShop.Tests\**\*.cs" />
+  </ItemGroup>
+  
 </Project>

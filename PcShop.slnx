@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="PcShop.csproj" />
+  <Project Path="PcShop.Tests/PcShop.Tests.csproj" />
 </Solution>
