@@ -64,68 +64,96 @@ public class ConfiguratorController : Controller
             .Select(bi => bi.Product!)
             .ToListAsync();
 
-        var compatible = await _compat.GetCompatibleProductsAsync(categoryId, currentProducts);
+        var productsWithInfo = await _compat.GetProductsWithCompatibilityInfoAsync(categoryId, currentProducts);
 
-        return Json(compatible.Select(p => new
+        return Json(productsWithInfo.Select(p => new
         {
-            p.Id,
-            p.Name,
-            p.Brand,
-            p.Price,
-            p.ImageUrl,
-            p.Stock
+            id = p.Product.Id,
+            name = p.Product.Name,
+            brand = p.Product.Brand,
+            price = p.Product.Price,
+            imageUrl = p.Product.ImageUrl,
+            stock = p.Product.Stock,
+            isCompatible = p.IsCompatible,
+            reason = p.IncompatibilityReason
         }));
     }
 
-    // Добавить компонент в сборку
-    [HttpPost]
-    public async Task<IActionResult> AddItem(int productId)
+   // Добавить компонент в сборку
+[HttpPost]
+public async Task<IActionResult> AddItem(int productId)
+{
+    var userId = GetCurrentUserId();
+    var build = await GetOrCreateActiveBuildAsync(userId);
+    var product = await _db.Products.FindAsync(productId);
+
+    if (product == null) 
     {
-        var userId = GetCurrentUserId();
-        var build = await GetOrCreateActiveBuildAsync(userId);
-        var product = await _db.Products.FindAsync(productId);
+        TempData["Error"] = "Товар не найден";
+        return RedirectToAction(nameof(Index));
+    }
 
-        if (product == null)
-            return NotFound();
+    if (product.Stock <= 0)
+    {
+        TempData["Error"] = $"Товар «{product.Name}» отсутствует на складе";
+        return RedirectToAction(nameof(Index));
+    }
 
-        // Определяем категорию товара и удаляем старый товар этой же категории (замена)
-        var existingItem = await _db.BuildItems
-            .Include(bi => bi.Product)
-            .FirstOrDefaultAsync(bi => bi.BuildId == build.Id
-                                    && bi.Product!.CategoryId == product.CategoryId);
+    // Получаем текущие товары (исключая товар той же категории, т.к. мы его заменяем)
+    var currentProducts = await _db.BuildItems
+        .Where(bi => bi.BuildId == build.Id)
+        .Include(bi => bi.Product)
+        .Where(bi => bi.Product != null && bi.Product.CategoryId != product.CategoryId)
+        .Select(bi => bi.Product!)
+        .ToListAsync();
 
-        if (existingItem != null)
-            _db.BuildItems.Remove(existingItem);
+    // 🔒 СЕРВЕРНАЯ ПРОВЕРКА: не дадим добавить несовместимый товар, даже если JS обошли
+    var reason = await _compat.GetIncompatibilityReasonAsync(product, currentProducts);
+    if (reason != null)
+    {
+        TempData["Error"] = $"Нельзя добавить «{product.Name}»: {reason}";
+        return RedirectToAction(nameof(Index));
+    }
 
-        _db.BuildItems.Add(new BuildItem
-        {
-            BuildId = build.Id,
-            ProductId = productId,
-            Quantity = 1
-        });
+    // Замена компонента той же категории (если он уже был в сборке)
+    var existingItem = await _db.BuildItems
+        .Include(bi => bi.Product)
+        .FirstOrDefaultAsync(bi => bi.BuildId == build.Id 
+                                && bi.Product != null 
+                                && bi.Product.CategoryId == product.CategoryId);
 
+    if (existingItem != null)
+        _db.BuildItems.Remove(existingItem);
+
+    _db.BuildItems.Add(new BuildItem
+    {
+        BuildId = build.Id,
+        ProductId = productId,
+        Quantity = 1
+    });
+
+    await _db.SaveChangesAsync();
+    return RedirectToAction(nameof(Index));
+}
+
+// Удалить компонент
+[HttpPost]
+public async Task<IActionResult> RemoveItem(int productId)
+{
+    var userId = GetCurrentUserId();
+    var build = await GetOrCreateActiveBuildAsync(userId);
+    
+    var item = await _db.BuildItems
+        .FirstOrDefaultAsync(bi => bi.BuildId == build.Id && bi.ProductId == productId);
+    
+    if (item != null)
+    {
+        _db.BuildItems.Remove(item);
         await _db.SaveChangesAsync();
-        return RedirectToAction(nameof(Index));
     }
-
-    // Удалить компонент
-    [HttpPost]
-    public async Task<IActionResult> RemoveItem(int productId)
-    {
-        var userId = GetCurrentUserId();
-        var build = await GetOrCreateActiveBuildAsync(userId);
-
-        var item = await _db.BuildItems
-            .FirstOrDefaultAsync(bi => bi.BuildId == build.Id && bi.ProductId == productId);
-
-        if (item != null)
-        {
-            _db.BuildItems.Remove(item);
-            await _db.SaveChangesAsync();
-        }
-
-        return RedirectToAction(nameof(Index));
-    }
+    
+    return RedirectToAction(nameof(Index));
+}
 
     // Оформить заказ из сборки
     [HttpPost]

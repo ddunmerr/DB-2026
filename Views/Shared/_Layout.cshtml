@@ -24,18 +24,31 @@
                 </li>
                 <li class="nav-item">
                     <a class="nav-link text-dark" asp-controller="Catalog" asp-action="Index">Каталог</a>
-                </li>
-                @if (User.Identity?.IsAuthenticated == true)
-                {
-                    <li class="nav-item">
-                        <a class="nav-link text-dark" asp-controller="Configurator" asp-action="Index">
-                            🛠️ Конфигуратор
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link text-dark" asp-controller="Order" asp-action="Index">📦 Мои заказы</a>
-                    </li>
-                }
+                </li>@if (User.Identity?.IsAuthenticated == true)
+                 {
+                     <li class="nav-item">
+                         <a class="nav-link text-dark" asp-controller="Configurator" asp-action="Index">🛠️ Конфигуратор</a>
+                     </li>
+                     <li class="nav-item">
+                         <a class="nav-link text-dark" asp-controller="Order" asp-action="Index">📦 Мои заказы</a>
+                     </li>
+
+                     // 👇 ДОБАВЬ ЭТО (покажет ссылку только если роль = admin)
+                     @if (User.IsInRole("admin"))
+                     {
+                         <li class="nav-item dropdown">
+                             <a class="nav-link dropdown-toggle text-danger fw-bold" href="#" role="button" data-bs-toggle="dropdown">
+                                 ⚙️ Админ-панель
+                             </a>
+                             <ul class="dropdown-menu">
+                                 <li><a class="dropdown-item" asp-controller="Admin" asp-action="Dashboard">📊 Дашборд</a></li>
+                                 <li><a class="dropdown-item" asp-controller="Admin" asp-action="Index">📦 Товары</a></li>
+                                 <li><a class="dropdown-item" asp-controller="Admin" asp-action="Orders">📋 Заказы</a></li>
+                             </ul>
+                         </li>
+                     }
+                     // ... кнопка Выйти ...
+                 }
             </ul>
             <ul class="navbar-nav">
                 @if (User.Identity?.IsAuthenticated == true)

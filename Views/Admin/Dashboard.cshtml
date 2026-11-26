@@ -1,0 +1,44 @@
+﻿@{ ViewData["Title"] = "Аналитика"; }
+<div class="container py-4">
+    <h2>📊 Аналитический дашборд</h2>
+    
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card text-white bg-success mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">Общая выручка</h5>
+                    <h2>@ViewBag.TotalRevenue.ToString("C")</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card text-white bg-primary mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">Всего заказов</h5>
+                    <h2>@ViewBag.TotalOrders</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-header bg-dark text-white">🏆 Топ-5 самых прибыльных товаров</div>
+        <div class="card-body">
+            <table class="table">
+                <thead>
+                <tr><th>Товар</th><th>Продано шт.</th><th>Выручка</th></tr>
+                </thead>
+                <tbody>
+                @foreach (var item in (dynamic)ViewBag.TopProducts)
+                {
+                    <tr>
+                        <td>@item.ProductName</td> <!-- Было item.Product.Name -->
+                        <td>@item.TotalSold</td>
+                        <td><strong>@item.Revenue.ToString("C")</strong></td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>

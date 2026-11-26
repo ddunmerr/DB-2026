@@ -1,0 +1,60 @@
+﻿@model List<PcShop.Models.Entities.Product>
+@{ ViewData["Title"] = "Управление товарами"; }
+
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>📦 Управление товарами</h2>
+        <a asp-action="Edit" class="btn btn-success">+ Добавить товар</a>
+    </div>
+
+    <form method="get" class="row g-3 mb-4">
+        <div class="col-md-6">
+            <input type="text" name="search" class="form-control" placeholder="Поиск по названию или бренду..." value="@ViewBag.Search" />
+        </div>
+        <div class="col-md-4">
+            <select name="sortBy" class="form-select" onchange="this.form.submit()">
+                <option value="name" selected="@(ViewBag.SortBy == "name")">По названию (А-Я)</option>
+                <option value="price_asc" selected="@(ViewBag.SortBy == "price_asc")">По цене (возрастание)</option>
+                <option value="price_desc" selected="@(ViewBag.SortBy == "price_desc")">По цене (убывание)</option>
+                <option value="stock" selected="@(ViewBag.SortBy == "stock")">По остатку на складе</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <button type="submit" class="btn btn-primary w-100">Найти</button>
+        </div>
+    </form>
+
+    <table class="table table-hover align-middle">
+        <thead class="table-light">
+            <tr>
+                <th>Изображение</th>
+                <th>Название</th>
+                <th>Категория</th>
+                <th>Цена</th>
+                <th>Остаток</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in Model)
+            {
+                <tr>
+                    <td><img src="@(item.ImageUrl ?? "/images/no-image.png")" width="50" height="50" class="rounded" /></td>
+                    <td>@item.Name<br><small class="text-muted">@item.Brand</small></td>
+                    <td>@item.Category?.Title</td>
+                    <td>@item.Price.ToString("C")</td>
+                    <td>
+                        <span class="badge @(item.Stock > 0 ? "bg-success" : "bg-danger")">@item.Stock шт.</span>
+                    </td>
+                    <td>
+                        <a asp-action="Edit" asp-route-id="@item.Id" class="btn btn-sm btn-outline-primary">✏️</a>
+                        <form asp-action="Delete" asp-route-id="@item.Id" method="post" class="d-inline" onsubmit="return confirm('Удалить товар?');">
+                            @Html.AntiForgeryToken()
+                            <button type="submit" class="btn btn-sm btn-outline-danger">🗑️</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>

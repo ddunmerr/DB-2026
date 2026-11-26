@@ -1,0 +1,70 @@
+﻿@model PcShop.Models.ViewModels.ProductEditViewModel
+@{ ViewData["Title"] = Model.Id == 0 ? "Новый товар" : "Редактирование товара"; }
+
+<div class="container py-4">
+    <h2>@(Model.Id == 0 ? "Добавление товара" : "Редактирование товара")</h2>
+    
+    <form asp-action="Edit" method="post" enctype="multipart/form-data" class="row g-3">
+        <input type="hidden" asp-for="Id" />
+        <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+        <div class="col-md-8">
+            <div class="mb-3">
+                <label asp-for="Name" class="form-label"></label>
+                <input asp-for="Name" class="form-control" />
+                <span asp-validation-for="Name" class="text-danger"></span>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label asp-for="Brand" class="form-label"></label>
+                    <input asp-for="Brand" class="form-control" />
+                    <span asp-validation-for="Brand" class="text-danger"></span>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label asp-for="CategoryId" class="form-label">Категория</label>
+                    <select asp-for="CategoryId" class="form-select" asp-items="ViewBag.Categories"></select>
+                    <span asp-validation-for="CategoryId" class="text-danger"></span>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label asp-for="Description" class="form-label"></label>
+                <textarea asp-for="Description" class="form-control" rows="3"></textarea>
+            </div>
+            <div class="mb-3">
+                <label asp-for="Specs" class="form-label">Характеристики (JSON)</label>
+                <textarea asp-for="Specs" class="form-control font-monospace" rows="5" placeholder='{"socket":"AM5", "tdp":105}'></textarea>
+                <span asp-validation-for="Specs" class="text-danger"></span>
+                <small class="text-muted">Введите валидный JSON. Ошибка здесь не даст сохранить товар.</small>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-body">
+                    <div class="mb-3 text-center">
+                        @if (!string.IsNullOrEmpty(Model.CurrentImageUrl))
+                        {
+                            <img src="@Model.CurrentImageUrl" class="img-fluid rounded mb-2" style="max-height: 200px;" />
+                        }
+                        <label asp-for="ImageFile" class="form-label">Загрузить новое фото</label>
+                        <input asp-for="ImageFile" class="form-control" accept="image/*" />
+                        <span asp-validation-for="ImageFile" class="text-danger"></span>
+                    </div>
+                    <div class="mb-3">
+                        <label asp-for="Price" class="form-label"></label>
+                        <input asp-for="Price" type="text" class="form-control" />
+                        <span asp-validation-for="Price" class="text-danger"></span>
+                    </div>
+                    <div class="mb-3">
+                        <label asp-for="Stock" class="form-label">Остаток на складе</label>
+                        <input asp-for="Stock" class="form-control" />
+                        <span asp-validation-for="Stock" class="text-danger"></span>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">💾 Сохранить</button>
+                    <a asp-action="Index" class="btn btn-outline-secondary w-100 mt-2">Отмена</a>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+

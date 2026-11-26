@@ -103,35 +103,92 @@
 </div>
 
 @section Scripts {
-    <script>
-        document.querySelectorAll('.category-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const categoryId = btn.dataset.categoryId;
-                const response = await fetch(`/Configurator/GetCompatible?categoryId=${categoryId}`);
-                const products = await response.json();
+<script>
+    document.querySelectorAll('.category-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            // Подсветка активной вкладки
+            document.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
 
-                const list = document.getElementById('productsList');
-                if (products.length === 0) {
-                    list.innerHTML = '<p class="text-muted">Нет совместимых товаров</p>';
-                    return;
-                }
+            const categoryId = btn.dataset.categoryId;
+            const response = await fetch(`/Configurator/GetCompatible?categoryId=${categoryId}`);
+            const products = await response.json();
 
-                list.innerHTML = products.map(p => `
-                    <div class="card mb-2">
-                        <div class="card-body d-flex justify-content-between">
-                            <div>
-                                <strong>${p.name}</strong><br>
-                                <small class="text-muted">${p.brand}</small><br>
-                                <span class="text-success">${p.price.toLocaleString()} ₽</span>
+            const list = document.getElementById('productsList');
+
+            if (products.length === 0) {
+                list.innerHTML = '<p class="text-muted">В этой категории пока нет товаров</p>';
+                return;
+            }
+
+            list.innerHTML = products.map(p => {
+                const disabledAttr = p.isCompatible ? '' : 'disabled';
+                const cardClass = p.isCompatible ? '' : 'opacity-75';
+                const badgeHtml = p.isCompatible
+                    ? '<span class="badge bg-success">✓ Совместим</span>'
+                    : `<span class="badge bg-danger">✗ Не совместим</span>`;
+
+                const reasonHtml = p.isCompatible
+                    ? ''
+                    : `<div class="alert alert-danger small py-1 px-2 mt-2 mb-0">
+                         <strong>Причина:</strong> ${p.reason}
+                       </div>`;
+
+                const stockHtml = p.stock > 0
+                    ? `<span class="badge bg-success">В наличии: ${p.stock}</span>`
+                    : `<span class="badge bg-danger">Нет в наличии</span>`;
+
+                const outOfStockDisabled = p.stock > 0 ? '' : 'disabled';
+
+                return `
+                    <div class="card mb-2 ${cardClass}">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div class="flex-grow-1">
+                                    <div class="d-flex align-items-center gap-2 mb-1">
+                                        <strong>${p.name}</strong>
+                                        ${badgeHtml}
+                                    </div>
+                                    <small class="text-muted">${p.brand}</small><br>
+                                    <span class="text-success fw-bold">${p.price.toLocaleString('ru-RU')} ₽</span>
+                                    <div class="mt-1">${stockHtml}</div>
+                                    ${reasonHtml}
+                                </div>
+                                <form action="/Configurator/AddItem" method="post" class="ms-2">
+                                    <input type="hidden" name="productId" value="${p.id}" />
+                                    <button type="submit" class="btn btn-primary"
+                                            ${disabledAttr} ${outOfStockDisabled}
+                                            title="${p.isCompatible ? (p.stock > 0 ? 'Добавить в сборку' : 'Нет в наличии') : 'Товар не совместим'}">
+                                        +
+                                    </button>
+                                </form>
                             </div>
-                            <form action="/Configurator/AddItem" method="post">
-                                <input type="hidden" name="productId" value="${p.id}" />
-                                <button type="submit" class="btn btn-primary">+</button>
-                            </form>
                         </div>
                     </div>
-                `).join('');
-            });
+                `;
+            }).join('');
         });
-    </script>
+    });
+
+    // Автовыбор первой категории при загрузке
+    const firstBtn = document.querySelector('.category-btn');
+    if (firstBtn) firstBtn.click();
+</script>
+
+<style>
+    .category-btn.active {
+        font-weight: bold;
+        color: #0d6efd;
+        border-bottom: 2px solid #0d6efd;
+    }
+    .category-btn {
+        background: none;
+        border: none;
+        padding: 0.5rem 1rem;
+        cursor: pointer;
+    }
+    .category-btn:hover {
+        color: #0d6efd;
+    }
+</style>
 }

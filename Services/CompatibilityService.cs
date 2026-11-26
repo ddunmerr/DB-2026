@@ -2,14 +2,15 @@
 using Microsoft.EntityFrameworkCore;
 using PcShop.Data;
 using PcShop.Models.Entities;
+using PcShop.Models.ViewModels;
 
 namespace PcShop.Services;
 
 public class CompatibilityService : ICompatibilityService
 {
     private readonly AppDbContext _db;
+    private readonly List<CompatibilityRule> _rules;
 
-    // ID категорий
     private const int CategoryCpu = 2;
     private const int CategoryMb = 3;
     private const int CategoryRam = 4;
@@ -17,237 +18,231 @@ public class CompatibilityService : ICompatibilityService
     private const int CategoryPsu = 6;
     private const int CategoryCase = 7;
 
-    public CompatibilityService(AppDbContext db) => _db = db;
+    private const int BaseSystemTdp = 100;   // плата, накопители, вентиляторы
+    private const int PsuHeadroomWatts = 100; // рекомендуемый запас
+
+    public CompatibilityService(AppDbContext db)
+    {
+        _db = db;
+        _rules = BuildRules();
+    }
+
+    /// <summary>
+    /// Парное правило совместимости. Проверяется в обе стороны,
+    /// поэтому порядок выбора комплектующих не влияет на результат.
+    /// </summary>
+    private sealed record CompatibilityRule(
+        int CategoryA,
+        int CategoryB,
+        Func<Product, Product, string?> Check);
+
+    private List<CompatibilityRule> BuildRules() => new()
+    {
+        // === CPU ↔ MB: сокет ===
+        new(CategoryCpu, CategoryMb, (cpu, mb) =>
+        {
+            var cpuSocket = GetStr(ParseSpecs(cpu), "socket");
+            var mbSocket = GetStr(ParseSpecs(mb), "socket");
+            return cpuSocket != mbSocket
+                ? $"Сокет процессора ({cpuSocket}) не совпадает с сокетом материнской платы ({mbSocket})"
+                : null;
+        }),
+
+        // === MB ↔ RAM: тип памяти (физическая несовместимость) ===
+        new(CategoryMb, CategoryRam, (mb, ram) =>
+        {
+            var mbType = GetStr(ParseSpecs(mb), "memory_type");
+            var ramType = GetStr(ParseSpecs(ram), "type");
+            return mbType != ramType
+                ? $"Материнская плата поддерживает {mbType}, а выбранная память — {ramType}"
+                : null;
+        }),
+
+        // === MB ↔ Case: форм-фактор ===
+        new(CategoryMb, CategoryCase, (mb, cs) =>
+        {
+            var mbForm = GetStr(ParseSpecs(mb), "form_factor");
+            var caseForm = GetStr(ParseSpecs(cs), "form_factor");
+            return FormFactorRank(mbForm) > FormFactorRank(caseForm)
+                ? $"Плата формата {mbForm} не влезет в корпус (макс. поддерживаемый формат — {caseForm})"
+                : null;
+        }),
+
+        // === GPU ↔ Case: длина видеокарты ===
+        new(CategoryGpu, CategoryCase, (gpu, cs) =>
+        {
+            var len = GetInt(ParseSpecs(gpu), "length");
+            var max = GetInt(ParseSpecs(cs), "max_gpu_length");
+            return max > 0 && len > max
+                ? $"Видеокарта ({len} мм) длиннее, чем позволяет корпус (макс. {max} мм)"
+                : null;
+        }),
+
+        // === GPU ↔ PSU: коннекторы питания (с учётом количества) ===
+        new(CategoryGpu, CategoryPsu, (gpu, psu) =>
+        {
+            var required = GetStringArray(ParseSpecs(gpu), "power_connectors");
+            var available = GetStringArray(ParseSpecs(psu), "power_connectors");
+
+            var missing = required
+                .GroupBy(c => c)
+                .Where(g => available.Count(a => a == g.Key) < g.Count())
+                .Select(g => $"{g.Key} ×{g.Count()} (у БП есть {available.Count(a => a == g.Key)})")
+                .ToList();
+
+            return missing.Count > 0
+                ? $"Блоку питания не хватает коннекторов для видеокарты: {string.Join(", ", missing)}"
+                : null;
+        }),
+    };
 
     // ============================================================
-    // 1. ПОЛУЧЕНИЕ СОВМЕСТИМЫХ ТОВАРОВ (двусторонняя проверка)
+    // 1. СПИСОК ТОВАРОВ С ПРИЧИНАМИ НЕСОВМЕСТИМОСТИ
     // ============================================================
-    public async Task<List<Product>> GetCompatibleProductsAsync(
+    public async Task<List<ProductWithCompatibilityInfo>> GetProductsWithCompatibilityInfoAsync(
         int categoryId, IEnumerable<Product> currentBuild)
     {
-        var buildList = currentBuild.ToList();
+        // Компонент той же категории будет заменён — исключаем его из контекста
+        var context = currentBuild.Where(p => p.CategoryId != categoryId).ToList();
+
         var candidates = await _db.Products
             .Where(p => p.CategoryId == categoryId)
             .ToListAsync();
 
-        return candidates.Where(p => IsCompatible(p, categoryId, buildList)).ToList();
-    }
-
-    private bool IsCompatible(Product candidate, int categoryId, List<Product> build)
-    {
-        var specs = ParseSpecs(candidate);
-
-        var cpu = build.FirstOrDefault(p => p.CategoryId == CategoryCpu);
-        var mb = build.FirstOrDefault(p => p.CategoryId == CategoryMb);
-        var ram = build.FirstOrDefault(p => p.CategoryId == CategoryRam);
-        var gpu = build.FirstOrDefault(p => p.CategoryId == CategoryGpu);
-        var psu = build.FirstOrDefault(p => p.CategoryId == CategoryPsu);
-
-        return categoryId switch
+        var result = candidates.Select(p =>
         {
-            // === CPU ===
-            // Если выбрана MB — сокет CPU должен совпадать с сокетом MB
-            CategoryCpu when mb != null =>
-                GetStr(specs, "socket") == GetStr(ParseSpecs(mb), "socket"),
-
-            // === MB ===
-            // Если выбран CPU — сокет MB должен совпадать с сокетом CPU
-            // Если выбрана RAM — тип памяти MB должен совпадать с типом RAM
-            CategoryMb => IsMbCompatible(specs, cpu, ram),
-
-            // === RAM ===
-            // Если выбрана MB — тип памяти RAM должен совпадать с типом, который поддерживает MB
-            // Если выбран CPU — частота RAM не должна превышать макс. частоту CPU
-            CategoryRam => IsRamCompatible(specs, mb, cpu),
-
-            // === GPU ===
-            // Если выбран PSU — коннекторы питания GPU должны поддерживаться БП
-            CategoryGpu => IsGpuCompatible(specs, psu),
-
-            // === PSU ===
-            // Мощность должна покрывать TDP системы
-            // Коннекторы должны поддерживать GPU (если выбрана)
-            CategoryPsu => IsPsuCompatible(specs, cpu, gpu),
-
-            // === Case ===
-            // Форм-фактор MB должен поддерживаться
-            // Длина GPU должна влезать
-            CategoryCase => IsCaseCompatible(specs, mb, gpu),
-
-            _ => true
-        };
-    }
-
-    // --- Проверки совместимости по категориям ---
-
-    private bool IsMbCompatible(JsonElement mbSpecs, Product? cpu, Product? ram)
-    {
-        // Проверка сокета с CPU
-        if (cpu != null)
-        {
-            if (GetStr(mbSpecs, "socket") != GetStr(ParseSpecs(cpu), "socket"))
-                return false;
-        }
-
-        // Проверка типа памяти с RAM
-        if (ram != null)
-        {
-            if (GetStr(mbSpecs, "memory_type") != GetStr(ParseSpecs(ram), "type"))
-                return false;
-        }
-
-        return true;
-    }
-
-    private bool IsRamCompatible(JsonElement ramSpecs, Product? mb, Product? cpu)
-    {
-        if (mb != null)
-        {
-            if (GetStr(ramSpecs, "type") != GetStr(ParseSpecs(mb), "memory_type"))
-                return false;
-        }
-        return true;
-    }
-
-    private bool IsGpuCompatible(JsonElement gpuSpecs, Product? psu)
-    {
-        // Проверка коннекторов питания с PSU
-        if (psu != null)
-        {
-            var gpuConnectors = GetStringArray(ParseSpecs(psu), "power_connectors");
-            var psuConnectors = GetStringArray(gpuSpecs, "power_connectors");
-
-            // Простая проверка: каждый коннектор GPU должен быть в PSU
-            // (в реальности нужна более сложная логика, но для курсовой достаточно)
-            foreach (var required in gpuConnectors)
+            var reason = GetIncompatibilityReason(p, context);
+            return new ProductWithCompatibilityInfo
             {
-                if (!psuConnectors.Contains(required))
-                    return false;
+                Product = p,
+                IsCompatible = reason == null,
+                IncompatibilityReason = reason
+            };
+        });
+
+        return result
+            .OrderByDescending(p => p.IsCompatible)
+            .ThenBy(p => p.Product.Name)
+            .ToList();
+    }
+
+    public Task<string?> GetIncompatibilityReasonAsync(Product candidate, IEnumerable<Product> currentBuild)
+    {
+        var context = currentBuild.Where(p => p.CategoryId != candidate.CategoryId).ToList();
+        return Task.FromResult(GetIncompatibilityReason(candidate, context));
+    }
+
+    private string? GetIncompatibilityReason(Product candidate, List<Product> context)
+    {
+        // Парные правила
+        foreach (var other in context)
+        {
+            var error = CheckPair(candidate, other);
+            if (error != null) return error;
+        }
+
+        // Системное правило: мощность БП зависит от CPU + GPU одновременно
+        if (candidate.CategoryId is CategoryPsu or CategoryCpu or CategoryGpu)
+        {
+            var psu = Pick(candidate, context, CategoryPsu);
+            if (psu != null)
+            {
+                var error = CheckPsuWattage(
+                    psu,
+                    Pick(candidate, context, CategoryCpu),
+                    Pick(candidate, context, CategoryGpu));
+                if (error != null) return error;
             }
         }
 
-        return true;
+        return null;
     }
 
-    private bool IsPsuCompatible(JsonElement psuSpecs, Product? cpu, Product? gpu)
+    /// <summary>
+    /// Проверяет пару товаров, подбирая правило в любом порядке категорий.
+    /// </summary>
+    private string? CheckPair(Product a, Product b)
     {
-        var wattage = GetInt(psuSpecs, "wattage");
-        var totalTdp = 100; // базовое потребление системы
+        foreach (var rule in _rules)
+        {
+            if (a.CategoryId == rule.CategoryA && b.CategoryId == rule.CategoryB)
+                return rule.Check(a, b);
 
-        if (cpu != null) totalTdp += GetInt(ParseSpecs(cpu), "tdp");
-        if (gpu != null) totalTdp += GetInt(ParseSpecs(gpu), "tdp");
-
-        // Запас минимум 100W
-        return wattage >= totalTdp + 100;
+            if (a.CategoryId == rule.CategoryB && b.CategoryId == rule.CategoryA)
+                return rule.Check(b, a);
+        }
+        return null;
     }
 
-    private bool IsCaseCompatible(JsonElement caseSpecs, Product? mb, Product? gpu)
+    private string? CheckPsuWattage(Product psu, Product? cpu, Product? gpu)
     {
-        // Форм-фактор MB
-        if (mb != null)
-        {
-            var mbForm = GetStr(ParseSpecs(mb), "form_factor");
-            var caseSupported = GetStr(caseSpecs, "form_factor");
+        var wattage = GetInt(ParseSpecs(psu), "wattage");
+        var consumption = EstimateConsumption(cpu, gpu);
+        var required = consumption + PsuHeadroomWatts;
 
-            var hierarchy = new Dictionary<string, int>
-            {
-                ["ITX"] = 1, ["mATX"] = 2, ["ATX"] = 3, ["E-ATX"] = 4
-            };
-
-            if (hierarchy.TryGetValue(mbForm, out var mbSize) &&
-                hierarchy.TryGetValue(caseSupported, out var caseSize) &&
-                mbSize > caseSize)
-                return false;
-        }
-
-        // Длина GPU
-        if (gpu != null)
-        {
-            var gpuLength = GetInt(ParseSpecs(gpu), "length");
-            var maxGpuLength = GetInt(caseSpecs, "max_gpu_length");
-            if (gpuLength > maxGpuLength) return false;
-        }
-
-        return true;
+        return wattage < required
+            ? $"Мощности БП ({wattage} Вт) недостаточно: система потребляет ~{consumption} Вт, нужен БП от {required} Вт"
+            : null;
     }
+
+    private int EstimateConsumption(Product? cpu, Product? gpu)
+    {
+        var tdp = BaseSystemTdp;
+        if (cpu != null) tdp += GetInt(ParseSpecs(cpu), "tdp");
+        if (gpu != null) tdp += GetInt(ParseSpecs(gpu), "tdp");
+        return tdp;
+    }
+
+    /// <summary>
+    /// Если проверяемый товар относится к нужной категории — берём его,
+    /// иначе ищем уже выбранный компонент этой категории.
+    /// </summary>
+    private Product? Pick(Product candidate, List<Product> context, int categoryId) =>
+        candidate.CategoryId == categoryId
+            ? candidate
+            : context.FirstOrDefault(p => p.CategoryId == categoryId);
+
+    private static int FormFactorRank(string form) => form switch
+    {
+        "ITX" => 1,
+        "mATX" => 2,
+        "ATX" => 3,
+        "E-ATX" => 4,
+        _ => 0
+    };
 
     // ============================================================
-    // 2. ФИНАЛЬНАЯ ВАЛИДАЦИЯ СБОРКИ (критические ошибки)
+    // 2. ФИНАЛЬНАЯ ВАЛИДАЦИЯ СБОРКИ (те же правила)
     // ============================================================
     public Task<List<string>> ValidateBuildAsync(IEnumerable<Product> buildItems)
     {
-        var errors = new List<string>();
         var build = buildItems.ToList();
+        var errors = new List<string>();
 
-        var cpu = build.FirstOrDefault(p => p.CategoryId == CategoryCpu);
-        var mb = build.FirstOrDefault(p => p.CategoryId == CategoryMb);
-        var ram = build.FirstOrDefault(p => p.CategoryId == CategoryRam);
-        var gpu = build.FirstOrDefault(p => p.CategoryId == CategoryGpu);
-        var psu = build.FirstOrDefault(p => p.CategoryId == CategoryPsu);
-        var @case = build.FirstOrDefault(p => p.CategoryId == CategoryCase);
-
-        // CPU ↔ MB (сокет)
-        if (cpu != null && mb != null)
-        {
-            if (GetStr(ParseSpecs(cpu), "socket") != GetStr(ParseSpecs(mb), "socket"))
-                errors.Add("Процессор и материнская плата имеют разные сокеты");
-        }
-
-        // MB ↔ RAM (тип памяти)
-        if (mb != null && ram != null)
-        {
-            if (GetStr(ParseSpecs(mb), "memory_type") != GetStr(ParseSpecs(ram), "type"))
-                errors.Add("Тип памяти не поддерживается материнской платой");
-        }
-
-        // RAM ↔ CPU (частота)
-        if (ram != null && cpu != null)
-        {
-            var ramSpeed = GetInt(ParseSpecs(ram), "speed");
-            var cpuMaxSpeed = GetInt(ParseSpecs(cpu), "max_ram_speed");
-            if (cpuMaxSpeed > 0 && ramSpeed > cpuMaxSpeed)
-                errors.Add($"Частота памяти ({ramSpeed} МГц) превышает максимум, поддерживаемый процессором ({cpuMaxSpeed} МГц)");
-        }
-
-        // GPU ↔ Case (длина)
-        if (@case != null && gpu != null)
-        {
-            var gpuLen = GetInt(ParseSpecs(gpu), "length");
-            var maxLen = GetInt(ParseSpecs(@case), "max_gpu_length");
-            if (gpuLen > maxLen)
-                errors.Add($"Видеокарта ({gpuLen} мм) не влезет в корпус (макс. {maxLen} мм)");
-        }
-
-        // PSU ↔ система (мощность)
-        if (psu != null && cpu != null && gpu != null)
-        {
-            var totalTdp = 100 + GetInt(ParseSpecs(cpu), "tdp") + GetInt(ParseSpecs(gpu), "tdp");
-            var wattage = GetInt(ParseSpecs(psu), "wattage");
-            if (wattage < totalTdp + 100)
-                errors.Add($"БП ({wattage}W) не потянет систему (нужно ~{totalTdp + 100}W)");
-        }
-
-        // GPU ↔ PSU (коннекторы)
-        if (gpu != null && psu != null)
-        {
-            var gpuConnectors = GetStringArray(ParseSpecs(gpu), "power_connectors");
-            var psuConnectors = GetStringArray(ParseSpecs(psu), "power_connectors");
-
-            foreach (var required in gpuConnectors)
+        // Все пары компонентов
+        for (int i = 0; i < build.Count; i++)
+            for (int j = i + 1; j < build.Count; j++)
             {
-                if (!psuConnectors.Contains(required))
-                {
-                    errors.Add($"БП не имеет необходимого коннектора питания для видеокарты: {required}");
-                    break;
-                }
+                var error = CheckPair(build[i], build[j]);
+                if (error != null) errors.Add(error);
             }
+
+        // Системное правило по мощности
+        var psu = build.FirstOrDefault(p => p.CategoryId == CategoryPsu);
+        if (psu != null)
+        {
+            var error = CheckPsuWattage(
+                psu,
+                build.FirstOrDefault(p => p.CategoryId == CategoryCpu),
+                build.FirstOrDefault(p => p.CategoryId == CategoryGpu));
+            if (error != null) errors.Add(error);
         }
 
-        return Task.FromResult(errors);
+        return Task.FromResult(errors.Distinct().ToList());
     }
 
     // ============================================================
-    // 3. ПРЕДУПРЕЖДЕНИЯ О "УЗКИХ ГОРЛЫШКАХ"
+    // 3. ПРЕДУПРЕЖДЕНИЯ О "УЗКИХ ГОРЛЫШКАХ" (не блокируют заказ)
     // ============================================================
     public Task<List<string>> GetBottleneckWarningsAsync(IEnumerable<Product> buildItems)
     {
@@ -258,8 +253,9 @@ public class CompatibilityService : ICompatibilityService
         var gpu = build.FirstOrDefault(p => p.CategoryId == CategoryGpu);
         var ram = build.FirstOrDefault(p => p.CategoryId == CategoryRam);
         var psu = build.FirstOrDefault(p => p.CategoryId == CategoryPsu);
+        var mb = build.FirstOrDefault(p => p.CategoryId == CategoryMb);
 
-        // === Баланс CPU ↔ GPU ===
+        // Баланс CPU ↔ GPU
         if (cpu != null && gpu != null)
         {
             var cpuScore = GetInt(ParseSpecs(cpu), "performance_score");
@@ -268,61 +264,67 @@ public class CompatibilityService : ICompatibilityService
             if (cpuScore > 0 && gpuScore > 0)
             {
                 var ratio = (double)gpuScore / cpuScore;
-
                 if (ratio > 2.0)
-                {
-                    warnings.Add($"⚠️ Процессор может быть узким горлышком для видеокарты. Видеокарта значительно мощнее процессора.");
-                }
+                    warnings.Add("Процессор может стать узким горлышком: видеокарта значительно мощнее.");
                 else if (ratio < 0.5)
-                {
-                    warnings.Add($"⚠️ Видеокарта может быть узким горлышком. Процессор значительно мощнее видеокарты.");
-                }
+                    warnings.Add("Видеокарта может стать узким горлышком: процессор значительно мощнее.");
             }
         }
 
-        // === Объём RAM ===
+        // Объём памяти
         if (ram != null)
         {
             var capacity = GetInt(ParseSpecs(ram), "capacity");
             if (capacity < 16)
-            {
-                warnings.Add($"⚠️ Объём памяти ({capacity} ГБ) может быть недостаточен для современных игр и задач.");
-            }
+                warnings.Add($"Объём памяти {capacity} ГБ может быть недостаточен для современных игр.");
         }
 
-        // === Запас БП ===
-        if (psu != null && cpu != null && gpu != null)
+        // Запас БП
+        if (psu != null && (cpu != null || gpu != null))
         {
-            var totalTdp = 100 + GetInt(ParseSpecs(cpu), "tdp") + GetInt(ParseSpecs(gpu), "tdp");
+            var consumption = EstimateConsumption(cpu, gpu);
             var wattage = GetInt(ParseSpecs(psu), "wattage");
-            var headroom = ((double)(wattage - totalTdp) / totalTdp) * 100;
+            var headroom = (double)(wattage - consumption) / consumption * 100;
 
             if (headroom < 20)
-            {
-                warnings.Add($"⚠️ Блок питания работает на пределе (запас всего {headroom:F0}%). Рекомендуется БП с большим запасом мощности.");
-            }
+                warnings.Add($"Блок питания работает почти на пределе: запас всего {headroom:F0}%.");
         }
 
-        // === Частота RAM vs максимум ===
+        // Частота памяти выше официальной поддержки CPU
         if (ram != null && cpu != null)
         {
-            var ramSpeed = GetInt(ParseSpecs(ram), "speed");
-            var cpuMaxSpeed = GetInt(ParseSpecs(cpu), "max_ram_speed");
+            var speed = GetInt(ParseSpecs(ram), "speed");
+            var maxSpeed = GetInt(ParseSpecs(cpu), "max_ram_speed");
+            if (maxSpeed > 0 && speed > maxSpeed)
+                warnings.Add($"Память {speed} МГц будет работать на пониженной частоте (контроллер CPU — до {maxSpeed} МГц).");
+        }
 
-            if (cpuMaxSpeed > 0 && ramSpeed > cpuMaxSpeed * 0.9)
-            {
-                warnings.Add($"⚠️ Частота памяти близка к максимуму, поддерживаемому процессором. Возможно, она будет работать на пониженной частоте.");
-            }
+        // Частота памяти выше поддержки платы
+        if (ram != null && mb != null)
+        {
+            var speed = GetInt(ParseSpecs(ram), "speed");
+            var maxSpeed = GetInt(ParseSpecs(mb), "max_ram_speed");
+            if (maxSpeed > 0 && speed > maxSpeed)
+                warnings.Add($"Плата официально поддерживает память до {maxSpeed} МГц, модуль на {speed} МГц потребует разгона (XMP/EXPO).");
+        }
+
+        // Память занимает не все слоты (потенциал апгрейда)
+        if (ram != null && mb != null)
+        {
+            var modules = GetInt(ParseSpecs(ram), "modules");
+            var slots = GetInt(ParseSpecs(mb), "ram_slots");
+            if (slots > 0 && modules > slots)
+                warnings.Add($"Комплект из {modules} модулей не поместится в {slots} слота памяти на плате.");
         }
 
         return Task.FromResult(warnings);
     }
 
     // ============================================================
-    // ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
+    // ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ РАБОТЫ С JSON
     // ============================================================
-
-    private JsonElement ParseSpecs(Product p) => JsonDocument.Parse(p.Specs).RootElement;
+    private JsonElement ParseSpecs(Product p) =>
+        JsonDocument.Parse(string.IsNullOrWhiteSpace(p.Specs) ? "{}" : p.Specs).RootElement;
 
     private string GetStr(JsonElement el, string key) =>
         el.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String
@@ -336,17 +338,9 @@ public class CompatibilityService : ICompatibilityService
     {
         var result = new List<string>();
         if (el.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Array)
-        {
             foreach (var item in v.EnumerateArray())
-            {
-                if (item.ValueKind == JsonValueKind.String)
-                {
-                    var str = item.GetString();
-                    if (!string.IsNullOrEmpty(str))
-                        result.Add(str);
-                }
-            }
-        }
+                if (item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } s)
+                    result.Add(s);
         return result;
     }
 }
