@@ -17,7 +17,9 @@ public class CompatibilityService : ICompatibilityService
     private const int CategoryGpu = 5;
     private const int CategoryPsu = 6;
     private const int CategoryCase = 7;
-
+    private const int CategorySsd = 8;
+    private const int CategoryHdd = 9;
+    
     private const int BaseSystemTdp = 100;   // плата, накопители, вентиляторы
     private const int PsuHeadroomWatts = 100; // рекомендуемый запас
 
@@ -92,6 +94,42 @@ public class CompatibilityService : ICompatibilityService
 
             return missing.Count > 0
                 ? $"Блоку питания не хватает коннекторов для видеокарты: {string.Join(", ", missing)}"
+                : null;
+        }),
+        
+        // === SSD (M.2) ↔ MB: наличие M.2 слотов ===
+        new(CategorySsd, CategoryMb, (ssd, mb) =>
+        {
+            var ssdInterface = GetStr(ParseSpecs(ssd), "interface");
+            if (ssdInterface == "M.2_NVMe" || ssdInterface == "M.2_SATA")
+            {
+                var m2Slots = GetInt(ParseSpecs(mb), "m2_slots");
+                return m2Slots == 0
+                    ? "Материнская плата не имеет слотов M.2 для этого SSD"
+                    : null;
+            }
+            return null;
+        }),
+
+        // === SSD (SATA) / HDD ↔ MB: наличие SATA портов ===
+        new(CategorySsd, CategoryMb, (ssd, mb) =>
+        {
+            var ssdInterface = GetStr(ParseSpecs(ssd), "interface");
+            if (ssdInterface == "SATA")
+            {
+                var sataPorts = GetInt(ParseSpecs(mb), "sata_ports");
+                return sataPorts == 0
+                    ? "Материнская плата не имеет портов SATA"
+                    : null;
+            }
+            return null;
+        }),
+
+        new(CategoryHdd, CategoryMb, (hdd, mb) =>
+        {
+            var sataPorts = GetInt(ParseSpecs(mb), "sata_ports");
+            return sataPorts == 0
+                ? "Материнская плата не имеет портов SATA для HDD"
                 : null;
         }),
     };

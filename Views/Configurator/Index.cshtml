@@ -8,7 +8,18 @@
 
     @if (TempData["Error"] != null)
     {
-        <div class="alert alert-danger">@TempData["Error"]</div>
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            @Html.Raw(TempData["Error"])
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+
+    @if (TempData["Success"] != null)
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            @TempData["Success"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
     }
 
     <div class="row">
@@ -44,6 +55,32 @@
                 <div class="card-header bg-success text-white">
                     <h5 class="mb-0">Ваша сборка</h5>
                 </div>
+                <!-- Чек-лист обязательных компонентов -->
+                <div class="card mb-3 border-0 bg-light">
+                    <div class="card-body py-2">
+                        <h6 class="mb-2 text-muted small text-uppercase fw-bold">Статус сборки</h6>
+                        @{
+                            var selectedCats = Model.Items.Select(i => i.Product!.CategoryId).ToList();
+                            var checks = new Dictionary<string, int> {
+                                { "Процессор", 2 },
+                                { "Материнская плата", 3 },
+                                { "Оперативная память", 4 },
+                                { "Блок питания", 6 },
+                                { "Корпус", 7 }
+                            };
+                        }
+                        @foreach (var check in checks)
+                        {
+                            var isPresent = selectedCats.Contains(check.Value);
+                            <div class="d-flex align-items-center mb-1 small">
+                                <span class="me-2" style="color: @(isPresent ? "#198754" : "#dc3545")">
+                                    @(isPresent ? "✅" : "❌")
+                                </span>
+                                <span class="@(isPresent ? "text-dark" : "text-danger fw-bold")">@check.Key</span>
+                            </div>
+                        }
+                    </div>
+                </div>
                 <div class="card-body">
                     @if (!Model.Items.Any())
                     {
@@ -54,15 +91,29 @@
                         @foreach (var item in Model.Items)
                         {
                             <div class="d-flex justify-content-between align-items-center mb-2 p-2 border rounded">
-                                <div>
+                                <div class="flex-grow-1">
                                     <small class="text-muted">@item.Product!.Category!.Title</small><br>
-                                    <strong>@item.Product.Name</strong><br>
-                                    <span>@item.Product.Price.ToString("C")</span>
+                                    <strong>@item.Product.Name</strong>
+                                    @if (item.Quantity > 1)
+                                    {
+                                        <span class="badge bg-info">×@item.Quantity</span>
+                                    }
+                                    <br>
+                                    <span>@((item.Product.Price * item.Quantity).ToString("C"))</span>
                                 </div>
-                                <form asp-action="RemoveItem" method="post">
-                                    <input type="hidden" name="productId" value="@item.ProductId" />
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">×</button>
-                                </form>
+                                <div class="d-flex gap-1">
+                                    @if (item.Product.CategoryId == 4 && item.Quantity > 1)
+                                    {
+                                        <form asp-action="DecreaseRamQuantity" method="post">
+                                            <input type="hidden" name="productId" value="@item.ProductId" />
+                                            <button type="submit" class="btn btn-sm btn-outline-secondary" title="Убрать одну планку">−</button>
+                                        </form>
+                                    }
+                                    <form asp-action="RemoveItem" method="post">
+                                        <input type="hidden" name="productId" value="@item.ProductId" />
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Удалить">×</button>
+                                    </form>
+                                </div>
                             </div>
                         }
 
@@ -76,7 +127,6 @@
                             <span>@Model.TotalTdp W</span>
                         </div>
 
-                        <!-- 👇 БЛОК С ПРЕДУПРЕЖДЕНИЯМИ -->
                         @if (Model.Warnings.Any())
                         {
                             <div class="alert alert-warning mt-3 mb-3">
@@ -110,7 +160,7 @@
             document.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
 
-            const categoryId = btn.dataset.categoryId;
+            const categoryId = parseInt(btn.dataset.categoryId);
             const response = await fetch(`/Configurator/GetCompatible?categoryId=${categoryId}`);
             const products = await response.json();
 
@@ -122,6 +172,9 @@
             }
 
             list.innerHTML = products.map(p => {
+                // Иконки для новых категорий
+                const categoryIcon = categoryId === 8 ? '💾 ' : categoryId === 9 ? '💿 ' : '';
+                
                 const disabledAttr = p.isCompatible ? '' : 'disabled';
                 const cardClass = p.isCompatible ? '' : 'opacity-75';
                 const badgeHtml = p.isCompatible
@@ -146,7 +199,7 @@
                             <div class="d-flex justify-content-between align-items-start">
                                 <div class="flex-grow-1">
                                     <div class="d-flex align-items-center gap-2 mb-1">
-                                        <strong>${p.name}</strong>
+                                        <strong>${categoryIcon}${p.name}</strong>
                                         ${badgeHtml}
                                     </div>
                                     <small class="text-muted">${p.brand}</small><br>
@@ -170,7 +223,7 @@
         });
     });
 
-    // Автовыбор первой категории при загрузке
+    // Автовыбор первой категории при загрузке страницы
     const firstBtn = document.querySelector('.category-btn');
     if (firstBtn) firstBtn.click();
 </script>
@@ -191,4 +244,5 @@
         color: #0d6efd;
     }
 </style>
+}
 }

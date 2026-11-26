@@ -80,80 +80,120 @@ public class ConfiguratorController : Controller
     }
 
    // Добавить компонент в сборку
-[HttpPost]
-public async Task<IActionResult> AddItem(int productId)
-{
-    var userId = GetCurrentUserId();
-    var build = await GetOrCreateActiveBuildAsync(userId);
-    var product = await _db.Products.FindAsync(productId);
-
-    if (product == null) 
+    [HttpPost]
+    public async Task<IActionResult> AddItem(int productId)
     {
-        TempData["Error"] = "Товар не найден";
-        return RedirectToAction(nameof(Index));
-    }
+        var userId = GetCurrentUserId();
+        var build = await GetOrCreateActiveBuildAsync(userId);
+        var product = await _db.Products.FindAsync(productId);
 
-    if (product.Stock <= 0)
-    {
-        TempData["Error"] = $"Товар «{product.Name}» отсутствует на складе";
-        return RedirectToAction(nameof(Index));
-    }
+        if (product == null)
+        {
+            TempData["Error"] = "Товар не найден";
+            return RedirectToAction(nameof(Index));
+        }
 
-    // Получаем текущие товары (исключая товар той же категории, т.к. мы его заменяем)
-    var currentProducts = await _db.BuildItems
-        .Where(bi => bi.BuildId == build.Id)
-        .Include(bi => bi.Product)
-        .Where(bi => bi.Product != null && bi.Product.CategoryId != product.CategoryId)
-        .Select(bi => bi.Product!)
-        .ToListAsync();
+        if (product.Stock <= 0)
+        {
+            TempData["Error"] = $"Товар «{product.Name}» отсутствует на складе";
+            return RedirectToAction(nameof(Index));
+        }
 
-    // 🔒 СЕРВЕРНАЯ ПРОВЕРКА: не дадим добавить несовместимый товар, даже если JS обошли
-    var reason = await _compat.GetIncompatibilityReasonAsync(product, currentProducts);
-    if (reason != null)
-    {
-        TempData["Error"] = $"Нельзя добавить «{product.Name}»: {reason}";
-        return RedirectToAction(nameof(Index));
-    }
+        // Получаем текущие товары (для RAM не исключаем, т.к. можно добавить несколько)
+        var currentProducts = await _db.BuildItems
+            .Where(bi => bi.BuildId == build.Id)
+            .Include(bi => bi.Product)
+            .Where(bi => bi.Product != null && (product.CategoryId == 4 || bi.Product.CategoryId != product.CategoryId))
+            .Select(bi => bi.Product!)
+            .ToListAsync();
 
-    // Замена компонента той же категории (если он уже был в сборке)
-    var existingItem = await _db.BuildItems
-        .Include(bi => bi.Product)
-        .FirstOrDefaultAsync(bi => bi.BuildId == build.Id 
-                                && bi.Product != null 
-                                && bi.Product.CategoryId == product.CategoryId);
+        // Проверка совместимости
+        var reason = await _compat.GetIncompatibilityReasonAsync(product, currentProducts);
+        if (reason != null)
+        {
+            TempData["Error"] = $"Нельзя добавить «{product.Name}»: {reason}";
+            return RedirectToAction(nameof(Index));
+        }
 
-    if (existingItem != null)
-        _db.BuildItems.Remove(existingItem);
+        // Для RAM: проверяем количество планок vs слотов на MB
+        if (product.CategoryId == 4) // RAM
+        {
+            var mb = currentProducts.FirstOrDefault(p => p.CategoryId == 3);
+            if (mb != null)
+            {
+                var ramSlots = GetRamSlots(mb);
+                var currentRamCount = await _db.BuildItems
+                    .Where(bi => bi.BuildId == build.Id && bi.Product!.CategoryId == 4)
+                    .SumAsync(bi => bi.Quantity);
 
-    _db.BuildItems.Add(new BuildItem
-    {
-        BuildId = build.Id,
-        ProductId = productId,
-        Quantity = 1
-    });
+                if (currentRamCount >= ramSlots)
+                {
+                    TempData["Error"] = $"На материнской плате только {ramSlots} слота памяти. Больше планок добавить нельзя.";
+                    return RedirectToAction(nameof(Index));
+                }
+            }
 
-    await _db.SaveChangesAsync();
-    return RedirectToAction(nameof(Index));
-}
+            // Добавляем RAM (не удаляем старый, а увеличиваем количество или добавляем новый)
+            var existingRam = await _db.BuildItems
+                .FirstOrDefaultAsync(bi => bi.BuildId == build.Id && bi.ProductId == productId);
 
-// Удалить компонент
-[HttpPost]
-public async Task<IActionResult> RemoveItem(int productId)
-{
-    var userId = GetCurrentUserId();
-    var build = await GetOrCreateActiveBuildAsync(userId);
-    
-    var item = await _db.BuildItems
-        .FirstOrDefaultAsync(bi => bi.BuildId == build.Id && bi.ProductId == productId);
-    
-    if (item != null)
-    {
-        _db.BuildItems.Remove(item);
+            if (existingRam != null)
+            {
+                existingRam.Quantity += 1;
+            }
+            else
+            {
+                _db.BuildItems.Add(new BuildItem
+                {
+                    BuildId = build.Id,
+                    ProductId = productId,
+                    Quantity = 1
+                });
+            }
+        }
+        else
+        {
+            // Для остальных категорий: замена компонента
+            var existingItem = await _db.BuildItems
+                .Include(bi => bi.Product)
+                .FirstOrDefaultAsync(bi => bi.BuildId == build.Id
+                                        && bi.Product != null
+                                        && bi.Product.CategoryId == product.CategoryId);
+
+            if (existingItem != null)
+                _db.BuildItems.Remove(existingItem);
+
+            _db.BuildItems.Add(new BuildItem
+            {
+                BuildId = build.Id,
+                ProductId = productId,
+                Quantity = 1
+            });
+        }
+
         await _db.SaveChangesAsync();
+        return RedirectToAction(nameof(Index));
     }
-    
-    return RedirectToAction(nameof(Index));
-}
+
+
+    // Удалить компонент
+    [HttpPost]
+    public async Task<IActionResult> RemoveItem(int productId)
+    {
+        var userId = GetCurrentUserId();
+        var build = await GetOrCreateActiveBuildAsync(userId);
+        
+        var item = await _db.BuildItems
+            .FirstOrDefaultAsync(bi => bi.BuildId == build.Id && bi.ProductId == productId);
+        
+        if (item != null)
+        {
+            _db.BuildItems.Remove(item);
+            await _db.SaveChangesAsync();
+        }
+        
+        return RedirectToAction(nameof(Index));
+    }
 
     // Оформить заказ из сборки
     [HttpPost]
@@ -169,19 +209,40 @@ public async Task<IActionResult> RemoveItem(int productId)
 
         if (!items.Any())
         {
-            TempData["Error"] = "Сборка пуста";
+            TempData["Error"] = "Сборка пуста. Добавьте компоненты.";
             return RedirectToAction(nameof(Index));
         }
 
-        // Проверяем совместимость
-        var errors = await _compat.ValidateBuildAsync(items.Select(i => i.Product!));
-        if (errors.Any())
+        // 1. Проверка совместимости (критические ошибки)
+        var compatErrors = await _compat.ValidateBuildAsync(items.Select(i => i.Product!));
+        if (compatErrors.Any())
         {
-            TempData["Error"] = string.Join("; ", errors);
+            TempData["Error"] = "❌ Ошибка совместимости:<br>" + string.Join("<br>", compatErrors);
             return RedirectToAction(nameof(Index));
         }
 
-        // Создаем заказ
+        // 2. НОВАЯ ПРОВЕРКА: Наличие всех обязательных компонентов
+        // ID категорий: 2=CPU, 3=MB, 4=RAM, 6=PSU, 7=Case
+        // (Видеокарта (5) не обязательна, если у процессора есть встроенная графика)
+        var mandatoryCategoryIds = new List<int> { 2, 3, 4, 6, 7 };
+        var selectedCategoryIds = items.Select(i => i.Product!.CategoryId).ToList();
+
+        var missingParts = new List<string>();
+        if (!selectedCategoryIds.Contains(2)) missingParts.Add("Процессор");
+        if (!selectedCategoryIds.Contains(3)) missingParts.Add("Материнская плата");
+        if (!selectedCategoryIds.Contains(4)) missingParts.Add("Оперативная память");
+        if (!selectedCategoryIds.Contains(6)) missingParts.Add("Блок питания");
+        if (!selectedCategoryIds.Contains(7)) missingParts.Add("Корпус");
+
+        // Если чего-то не хватает, прерываем оформление и показываем ошибку
+        if (missingParts.Any())
+        {
+            var errorMessages = missingParts.Select(p => $"Запчасть \"{p}\" обязательна к выбору");
+            TempData["Error"] = "⚠️ Невозможно оформить заказ. Неполная сборка:<br>" + string.Join("<br>", errorMessages);
+            return RedirectToAction(nameof(Index));
+        }
+
+        // 3. Если всё отлично, создаем Заказ
         var order = new Order
         {
             CustomerId = userId,
@@ -203,15 +264,15 @@ public async Task<IActionResult> RemoveItem(int productId)
             });
         }
 
-        // Очищаем сборку
+        // Очищаем сборку после успешного заказа
         _db.BuildItems.RemoveRange(items);
         await _db.SaveChangesAsync();
 
+        TempData["Success"] = "Заказ успешно оформлен!";
         return RedirectToAction("Details", "Order", new { id = order.Id });
     }
-
     // ---------- Вспомогательные ----------
-
+    
     private int GetCurrentUserId()
     {
         // 1. Сначала пытаемся получить из Claims (стандартный способ при Cookie Auth)
@@ -245,11 +306,44 @@ public async Task<IActionResult> RemoveItem(int productId)
         return build;
     }
 
+    
+    private int GetRamSlots(Product mb)
+    {
+        if (string.IsNullOrWhiteSpace(mb.Specs)) return 4; // по умолчанию
+        using var doc = JsonDocument.Parse(mb.Specs);
+        return doc.RootElement.TryGetProperty("ram_slots", out var v) ? v.GetInt32() : 4;
+    }
+    
     private int GetTdp(Product p)
     {
         if (p.Specs == null)
             return 0;
         using var doc = JsonDocument.Parse(p.Specs);
         return doc.RootElement.TryGetProperty("tdp", out var v) ? v.GetInt32() : 0;
+    }
+    
+    [HttpPost]
+    public async Task<IActionResult> DecreaseRamQuantity(int productId)
+    {
+        var userId = GetCurrentUserId();
+        var build = await GetOrCreateActiveBuildAsync(userId);
+
+        var item = await _db.BuildItems
+            .FirstOrDefaultAsync(bi => bi.BuildId == build.Id && bi.ProductId == productId);
+
+        if (item != null)
+        {
+            if (item.Quantity > 1)
+            {
+                item.Quantity -= 1;
+            }
+            else
+            {
+                _db.BuildItems.Remove(item);
+            }
+            await _db.SaveChangesAsync();
+        }
+
+        return RedirectToAction(nameof(Index));
     }
 }
